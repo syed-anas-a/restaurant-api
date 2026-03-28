@@ -13,7 +13,7 @@ class MenuItem(models.Model):
 
     title = models.CharField(max_length=255)
     price = models.DecimalField(max_digits=4, decimal_places=2)
-    category = models.CharField(choices=category_choices, max_length=25, default=category_choices[1][1])
+    category = models.CharField(choices=category_choices, max_length=25, default=category_choices[1][0])
     featured = models.BooleanField(default=False)
 
     def __str__(self):

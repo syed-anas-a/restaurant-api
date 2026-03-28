@@ -21,11 +21,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 from decouple import config
 
+
+def env_to_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
 # Replace the hardcoded string with this:
 SECRET_KEY = config('SECRET_KEY')
 
 # Bonus: Do the same for DEBUG
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = env_to_bool(config('DEBUG', default='True'), default=True)
 
 
 ALLOWED_HOSTS = []

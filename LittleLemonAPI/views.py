@@ -1,13 +1,12 @@
-from django.shortcuts import render
 from rest_framework import status, generics
 from rest_framework.views import APIView
 from .models import MenuItem, Cart, Order
-from .serializers import MenuItemSerializer, CartSerializer, OrderSerializer, OrderItemSerializer, OrderStatusSerializer, OrderManagerUpdateSerializer
-from rest_framework.permissions import IsAdminUser, IsAuthenticatedOrReadOnly, AllowAny, IsAuthenticated
-from .permissions import IsManager, IsDeliveryCrew, IsCustomer
+from .serializers import MenuItemSerializer, CartSerializer, OrderSerializer, OrderStatusSerializer, OrderManagerUpdateSerializer
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, AllowAny, IsAuthenticated
+from .permissions import IsManager
 from django.contrib.auth.models import User, Group
 from rest_framework.response import Response
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, PermissionDenied
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
@@ -20,11 +19,14 @@ class UserGroupManagement(APIView):
     permission_classes = [IsManager]
 
     def get_group(self, group_name):
-        if group_name == "delivery-crew":
-            group_name = "Delivery Crew"
+        group_map = {
+            "manager": "Manager",
+            "delivery-crew": "Delivery Crew",
+        }
+
         try:
-            return Group.objects.get(name__icontains=group_name)
-        except:
+            return Group.objects.get(name=group_map[group_name])
+        except (KeyError, Group.DoesNotExist):
             raise NotFound("Group not found!!")
 
     def get(self, request, group_name):
@@ -38,7 +40,7 @@ class UserGroupManagement(APIView):
         group = self.get_group(group_name)
         try:
             user = User.objects.get(id=user_id)
-        except:
+        except User.DoesNotExist:
             raise NotFound("User not found!!")
         group.user_set.add(user)
         return Response({"message": "User added"}, status=status.HTTP_201_CREATED)
@@ -51,7 +53,13 @@ class UserGroupManagement(APIView):
             raise NotFound("User not found.")
 
         group.user_set.remove(user)
-        return Response({"message: User removed!!"},status=status.HTTP_200_OK)
+        return Response({"message": "User removed!!"}, status=status.HTTP_200_OK)
+
+
+def ensure_customer(user):
+    if user.groups.filter(name='Manager').exists() or \
+       user.groups.filter(name='Delivery Crew').exists():
+        raise PermissionDenied("Only customers can place orders.")
 
 # Menu-item views
 class MenuItemList(generics.ListCreateAPIView):
@@ -78,8 +86,6 @@ class MenuItemList(generics.ListCreateAPIView):
 class MenuItemDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = MenuItem.objects.all()
     serializer_class = MenuItemSerializer
-    lookup_field = 'title'
-    lookup_url_kwarg = 'menuItem'
 
     def get_permissions(self):
         if self.request.method in ['PUT', 'PATCH', 'DELETE']:
@@ -94,30 +100,16 @@ class CartList(generics.ListCreateAPIView):
     def get_queryset(self):
         user = self.request.user
 
-        # Restrict cart access to customers only
-        if user.groups.filter(name='Manager').exists() or \
-           user.groups.filter(name='Delivery Crew').exists():
-            return Response({"message":"Only customers can place orders."},status=status.HTTP_401_UNAUTHORIZED)
-
+        ensure_customer(user)
         return Cart.objects.filter(user=user)
 
     def perform_create(self, serializer):
-        user = self.request.user
-
-        if user.groups.filter(name='Manager').exists() or \
-           user.groups.filter(name='Delivery Crew').exists():
-            return Response({"message":"Only customers can place orders."},status=status.HTTP_401_UNAUTHORIZED)
-
+        ensure_customer(self.request.user)
         serializer.save()
 
     def delete(self, request, *args, **kwargs):
-        user = request.user
-
-        if user.groups.filter(name='Manager').exists() or \
-           user.groups.filter(name='Delivery Crew').exists():
-            return Response({"message":"Only customers can place orders."},status=status.HTTP_401_UNAUTHORIZED)
-
-        Cart.objects.filter(user=user).delete()
+        ensure_customer(request.user)
+        Cart.objects.filter(user=request.user).delete()
         return Response(status=status.HTTP_200_OK)
     
 
@@ -140,10 +132,7 @@ class OrderList(generics.ListCreateAPIView):
         return Order.objects.filter(user=user)
 
     def perform_create(self, serializer):
-        if self.request.user.groups.filter(name='Manager').exists() or \
-           self.request.user.groups.filter(name='Delivery Crew').exists():
-            return Response({"message":"Only customers can place orders."},status=status.HTTP_401_UNAUTHORIZED)
-
+        ensure_customer(self.request.user)
         serializer.save()
 
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -160,8 +149,10 @@ class OrderDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Order.objects.all()
 
     def get_serializer_class(self):
-        user = self.request.user
+        if self.request.method in ['GET', 'HEAD', 'OPTIONS']:
+            return OrderSerializer
 
+        user = self.request.user
         if user.groups.filter(name='Delivery Crew').exists():
             return OrderStatusSerializer
 
@@ -186,10 +177,19 @@ class OrderDetail(generics.RetrieveUpdateDestroyAPIView):
             return Response(status=status.HTTP_401_UNAUTHORIZED)
         return super().destroy(request, *args, **kwargs)
 
+    def update(self, request, *args, **kwargs):
+        user = request.user
+        if not (
+            user.groups.filter(name='Manager').exists() or
+            user.groups.filter(name='Delivery Crew').exists()
+        ):
+            raise PermissionDenied("You do not have permission to update orders.")
+
+        return super().update(request, *args, **kwargs)
+
 
     
     
 
     
-
 

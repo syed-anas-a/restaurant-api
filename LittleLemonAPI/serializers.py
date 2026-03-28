@@ -62,7 +62,7 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = '__all__'
-        read_only_fields = ['user', 'order_value', 'date']
+        read_only_fields = ['user', 'delivery_crew', 'status', 'order_value', 'date']
 
     @transaction.atomic
     def create(self, validated_data):
@@ -104,4 +104,3 @@ class OrderManagerUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = ['delivery_crew', 'status']
-    
